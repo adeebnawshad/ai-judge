@@ -40,13 +40,12 @@ export default function ResultsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // filter state
   const [selectedJudgeIds, setSelectedJudgeIds] = useState<string[]>([]);
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
   const [selectedVerdicts, setSelectedVerdicts] = useState<string[]>([]);
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, []);
 
   async function loadData() {
@@ -54,7 +53,6 @@ export default function ResultsPage() {
     setError(null);
 
     try {
-      // Fetch evaluations, questions, judges in parallel
       const [evalRes, qRes, jRes] = await Promise.all([
         supabase.from("evaluations").select("*").order("created_at", {
           ascending: false,
@@ -71,7 +69,6 @@ export default function ResultsPage() {
       const questionRows = (qRes.data ?? []) as Question[];
       const judgeRows = (jRes.data ?? []) as Judge[];
 
-      // Index questions & judges for quick lookup
       const questionById = new Map<string, Question>();
       questionRows.forEach((q) => questionById.set(q.id, q));
 
@@ -106,11 +103,7 @@ export default function ResultsPage() {
     }
   }
 
-  function toggleInArray(
-    current: string[],
-    value: string,
-    checked: boolean
-  ): string[] {
+  function toggleInArray(current: string[], value: string, checked: boolean) {
     if (checked) {
       if (current.includes(value)) return current;
       return [...current, value];
@@ -155,216 +148,218 @@ export default function ResultsPage() {
     return { total, passCount, passRate };
   }, [filteredEvaluations]);
 
+  function verdictBadgeClass(verdict: string) {
+    if (verdict === "pass") return "badge badge-success";
+    if (verdict === "fail") return "badge badge-error";
+    if (verdict === "inconclusive") return "badge badge-muted";
+    return "badge badge-muted";
+  }
+
+  function handleClearFilters() {
+    setSelectedJudgeIds([]);
+    setSelectedQuestionIds([]);
+    setSelectedVerdicts([]);
+  }
+
+  const hasEvaluations = evaluations.length > 0;
+  const hasFiltered = filteredEvaluations.length > 0;
+
   return (
-    <div style={{ padding: "1rem" }}>
-      <h1>Results</h1>
+    <section className="page-section">
+      <header className="page-header">
+        <h1 className="page-title">Results</h1>
+        <p className="page-subtitle">
+          Browse stored evaluations with filters by judge, question, and verdict. The
+          pass rate updates live as you refine the view.
+        </p>
+      </header>
 
-      {loading && <p>Loading evaluations...</p>}
-      {error && <p style={{ color: "red" }}>{error}</p>}
+      <div className="card">
+        <div className="card-body" style={{ gap: "0.9rem" }}>
+          {error && (
+            <div className="status-banner status-error" role="status">
+              {error}
+            </div>
+          )}
 
-      {/* Summary bar */}
-      {!loading && evaluations.length > 0 && (
-        <div
-          style={{
-            margin: "1rem 0",
-            padding: "0.75rem 1rem",
-            border: "1px solid #444",
-            borderRadius: "4px",
-          }}
-        >
-          <strong>
-            Pass rate:{" "}
-            {total === 0 ? "N/A" : `${passRate.toFixed(1)}% pass of ${total} evaluations`}
-          </strong>
-          {total > 0 && (
-            <span style={{ marginLeft: "0.75rem", fontSize: "0.9rem" }}>
-              ({passCount} pass / {total - passCount} non-pass)
-            </span>
+          {loading && (
+            <p className="empty-state">Loading evaluations…</p>
+          )}
+
+          {/* Summary bar */}
+          {!loading && hasEvaluations && (
+            <div className="results-summary">
+              <div className="results-summary-main">
+                <div className="results-summary-label">Pass rate</div>
+                <div className="results-summary-value">
+                  {total === 0
+                    ? "N/A"
+                    : `${passRate.toFixed(1)}% pass of ${total} evaluations`}
+                </div>
+                {total > 0 && (
+                  <div className="results-summary-sub">
+                    {passCount} pass / {total - passCount} non-pass
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={handleClearFilters}
+                disabled={
+                  selectedJudgeIds.length === 0 &&
+                  selectedQuestionIds.length === 0 &&
+                  selectedVerdicts.length === 0
+                }
+              >
+                Clear filters
+              </button>
+            </div>
+          )}
+
+          {/* Filters */}
+          {!loading && hasEvaluations && (
+            <div className="filters-card">
+              {/* Judges filter */}
+              <div className="filter-column">
+                <div className="filter-title">Judge</div>
+                {judges.length === 0 ? (
+                  <p className="empty-state">No judges found.</p>
+                ) : (
+                  <div className="filter-options">
+                    {judges.map((j) => (
+                      <label key={j.id} className="filter-option">
+                        <input
+                          type="checkbox"
+                          checked={selectedJudgeIds.includes(j.id)}
+                          onChange={(e) =>
+                            setSelectedJudgeIds((prev) =>
+                              toggleInArray(prev, j.id, e.target.checked)
+                            )
+                          }
+                        />
+                        <span>{j.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Questions filter */}
+              <div className="filter-column">
+                <div className="filter-title">Question</div>
+                {questions.length === 0 ? (
+                  <p className="empty-state">No questions found.</p>
+                ) : (
+                  <div className="filter-options filter-options-scroll">
+                    {questions.map((q) => (
+                      <label key={q.id} className="filter-option">
+                        <input
+                          type="checkbox"
+                          checked={selectedQuestionIds.includes(q.id)}
+                          onChange={(e) =>
+                            setSelectedQuestionIds((prev) =>
+                              toggleInArray(prev, q.id, e.target.checked)
+                            )
+                          }
+                        />
+                        <span>{q.question_text}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Verdict filter */}
+              <div className="filter-column">
+                <div className="filter-title">Verdict</div>
+                <div className="filter-options">
+                  {["pass", "fail", "inconclusive"].map((v) => (
+                    <label key={v} className="filter-option">
+                      <input
+                        type="checkbox"
+                        checked={selectedVerdicts.includes(v)}
+                        onChange={(e) =>
+                          setSelectedVerdicts((prev) =>
+                            toggleInArray(prev, v, e.target.checked)
+                          )
+                        }
+                      />
+                      <span className="filter-verdict-label">{v}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Empty states / table */}
+          {!loading && !hasEvaluations && (
+            <p className="empty-state">
+              No evaluations found yet. Run AI judges on a queue to populate this view.
+            </p>
+          )}
+
+          {!loading && hasFiltered && (
+            <div className="table-wrapper">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Submission</th>
+                    <th>Question</th>
+                    <th>Judge</th>
+                    <th>Verdict</th>
+                    <th>Reasoning</th>
+                    <th>Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredEvaluations.map((e) => (
+                    <tr key={e.id}>
+                      <td>{e.submissionId}</td>
+                      <td>
+                        <div className="table-primary">
+                          <div className="table-title">{e.questionText}</div>
+                        </div>
+                      </td>
+                      <td>{e.judgeName}</td>
+                      <td>
+                        <span className={verdictBadgeClass(e.verdict)}>
+                          {e.verdict}
+                        </span>
+                      </td>
+                      <td>
+                        {e.reasoning ? (
+                          <span>{e.reasoning}</span>
+                        ) : (
+                          <span className="empty-state">
+                            (no reasoning provided)
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        {new Date(e.createdAt).toLocaleString(undefined, {
+                          year: "numeric",
+                          month: "short",
+                          day: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {!loading && hasEvaluations && !hasFiltered && (
+            <p className="empty-state">
+              No evaluations match the selected filters.
+            </p>
           )}
         </div>
-      )}
-
-      {/* Filters */}
-      {!loading && evaluations.length > 0 && (
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "1.5rem",
-            marginBottom: "1rem",
-            border: "1px solid #333",
-            padding: "0.75rem 1rem",
-            borderRadius: "4px",
-          }}
-        >
-          {/* Judges filter */}
-          <div>
-            <div style={{ fontWeight: "bold", marginBottom: "0.25rem" }}>
-              Filter by Judge
-            </div>
-            {judges.length === 0 ? (
-              <p style={{ fontSize: "0.9rem" }}>No judges found.</p>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-                {judges.map((j) => (
-                  <label key={j.id} style={{ fontSize: "0.9rem" }}>
-                    <input
-                      type="checkbox"
-                      checked={selectedJudgeIds.includes(j.id)}
-                      onChange={(e) =>
-                        setSelectedJudgeIds((prev) =>
-                          toggleInArray(prev, j.id, e.target.checked)
-                        )
-                      }
-                    />{" "}
-                    {j.name}
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Questions filter */}
-          <div>
-            <div style={{ fontWeight: "bold", marginBottom: "0.25rem" }}>
-              Filter by Question
-            </div>
-            {questions.length === 0 ? (
-              <p style={{ fontSize: "0.9rem" }}>No questions found.</p>
-            ) : (
-              <div
-                style={{
-                  maxHeight: "200px",
-                  overflowY: "auto",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "0.25rem",
-                }}
-              >
-                {questions.map((q) => (
-                  <label key={q.id} style={{ fontSize: "0.9rem" }}>
-                    <input
-                      type="checkbox"
-                      checked={selectedQuestionIds.includes(q.id)}
-                      onChange={(e) =>
-                        setSelectedQuestionIds((prev) =>
-                          toggleInArray(prev, q.id, e.target.checked)
-                        )
-                      }
-                    />{" "}
-                    {q.question_text}
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Verdict filter */}
-          <div>
-            <div style={{ fontWeight: "bold", marginBottom: "0.25rem" }}>
-              Filter by Verdict
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-              {["pass", "fail", "inconclusive"].map((v) => (
-                <label key={v} style={{ fontSize: "0.9rem" }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedVerdicts.includes(v)}
-                    onChange={(e) =>
-                      setSelectedVerdicts((prev) =>
-                        toggleInArray(prev, v, e.target.checked)
-                      )
-                    }
-                  />{" "}
-                  {v}
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Reset filters */}
-          <div>
-            <button
-              onClick={() => {
-                setSelectedJudgeIds([]);
-                setSelectedQuestionIds([]);
-                setSelectedVerdicts([]);
-              }}
-            >
-              Clear Filters
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Table */}
-      {!loading && evaluations.length === 0 && (
-        <p>No evaluations found yet. Try running AI judges on a queue.</p>
-      )}
-
-      {!loading && filteredEvaluations.length > 0 && (
-        <table
-          style={{
-            borderCollapse: "collapse",
-            minWidth: "100%",
-            fontSize: "0.9rem",
-          }}
-        >
-          <thead>
-            <tr>
-              <th style={thStyle}>Submission</th>
-              <th style={thStyle}>Question</th>
-              <th style={thStyle}>Judge</th>
-              <th style={thStyle}>Verdict</th>
-              <th style={thStyle}>Reasoning</th>
-              <th style={thStyle}>Created At</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredEvaluations.map((e) => (
-              <tr key={e.id}>
-                <td style={tdStyle}>{e.submissionId}</td>
-                <td style={tdStyle}>{e.questionText}</td>
-                <td style={tdStyle}>{e.judgeName}</td>
-                <td style={tdStyle}>
-                  <span
-                    style={{
-                      padding: "0.15rem 0.4rem",
-                      borderRadius: "4px",
-                      border: "1px solid #555",
-                      fontSize: "0.8rem",
-                    }}
-                  >
-                    {e.verdict}
-                  </span>
-                </td>
-                <td style={tdStyle}>{e.reasoning}</td>
-                <td style={tdStyle}>
-                  {new Date(e.createdAt).toLocaleString()}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {!loading &&
-        evaluations.length > 0 &&
-        filteredEvaluations.length === 0 && (
-          <p>No evaluations match the selected filters.</p>
-        )}
-    </div>
+      </div>
+    </section>
   );
 }
-
-const thStyle: React.CSSProperties = {
-  borderBottom: "1px solid #555",
-  padding: "0.5rem",
-  textAlign: "left",
-};
-
-const tdStyle: React.CSSProperties = {
-  borderBottom: "1px solid #333",
-  padding: "0.5rem",
-  verticalAlign: "top",
-};

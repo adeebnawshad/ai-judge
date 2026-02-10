@@ -23,6 +23,21 @@ type QuestionJudge = {
   judge_id: string;
 };
 
+type RunJudgesResponse = {
+  planned: number;
+  completed: number;
+  failed: number;
+  note?: string;
+  warnings?: string[];
+  error?: string;
+  hint?: string;
+};
+
+
+type RunStatus =
+  | { kind: "idle"; message: "" }
+  | { kind: "info" | "success" | "error"; message: string };
+
 export default function QueuePage() {
   const { queueId } = useParams<{ queueId: string }>();
 
@@ -32,44 +47,44 @@ export default function QueuePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // status + loading for "Run AI Judges"
-  const [runStatus, setRunStatus] = useState<string | null>(null);
+  const [runStatus, setRunStatus] = useState<RunStatus>({
+    kind: "idle",
+    message: "",
+  });
   const [isRunning, setIsRunning] = useState(false);
 
   useEffect(() => {
     if (!queueId) return;
-    loadData(queueId);
+    void loadData(queueId);
   }, [queueId]);
 
-  async function loadData(queueId: string) {
+  async function loadData(qId: string) {
     setLoading(true);
     setError(null);
+    setRunStatus({ kind: "idle", message: "" });
 
     try {
       const [questionsRes, judgesRes, mappingsRes] = await Promise.all([
         supabase
           .from("questions")
           .select("*")
-          .eq("queue_id", queueId)
+          .eq("queue_id", qId)
           .order("id", { ascending: true }),
         supabase
           .from("judges")
           .select("*")
           .eq("active", true)
           .order("name", { ascending: true }),
-        supabase
-          .from("question_judges")
-          .select("*")
-          .eq("queue_id", queueId),
+        supabase.from("question_judges").select("*").eq("queue_id", qId),
       ]);
 
       if (questionsRes.error) throw questionsRes.error;
       if (judgesRes.error) throw judgesRes.error;
       if (mappingsRes.error) throw mappingsRes.error;
 
-      setQuestions(questionsRes.data as Question[]);
-      setJudges(judgesRes.data as Judge[]);
-      setQuestionJudges(mappingsRes.data as QuestionJudge[]);
+      setQuestions((questionsRes.data ?? []) as Question[]);
+      setJudges((judgesRes.data ?? []) as Judge[]);
+      setQuestionJudges((mappingsRes.data ?? []) as QuestionJudge[]);
     } catch (err) {
       console.error(err);
       setError("Failed to load queue data.");
@@ -91,6 +106,7 @@ export default function QueuePage() {
   ) {
     if (!queueId) return;
     setError(null);
+    setRunStatus({ kind: "idle", message: "" });
 
     if (checked) {
       // Assign: insert into question_judges
@@ -139,13 +155,39 @@ export default function QueuePage() {
     }
   }
 
-  // call backend /api/run-judges
   async function handleRunJudges() {
     if (!queueId) return;
 
     setError(null);
-    setRunStatus("Running AI judges...");
+    setRunStatus({ kind: "idle", message: "" });
+
+    if (questions.length === 0) {
+      setRunStatus({
+        kind: "error",
+        message: "There are no questions in this queue. Import data first.",
+      });
+      return;
+    }
+
+    if (judges.length === 0) {
+      setRunStatus({
+        kind: "error",
+        message: "No active judges found. Create and activate judges first.",
+      });
+      return;
+    }
+
+    if (questionJudges.length === 0) {
+      setRunStatus({
+        kind: "error",
+        message:
+          "No judge assignments found. Assign at least one judge to a question before running.",
+      });
+      return;
+    }
+
     setIsRunning(true);
+    setRunStatus({ kind: "info", message: "Running AI judges…" });
 
     try {
       const res = await fetch("http://localhost:8787/api/run-judges", {
@@ -154,163 +196,199 @@ export default function QueuePage() {
         body: JSON.stringify({ queueId }),
       });
 
-      const data = await res.json();
+      let data: RunJudgesResponse | null = null;
+      
+      try {
+        data = (await res.json()) as RunJudgesResponse;
+      } catch {
+        data = null;
+      }
 
       if (!res.ok) {
         console.error("Run judges error:", data);
-        setRunStatus("Failed to run AI judges.");
+
+        const backendError =
+          (data && typeof data.error === "string" && data.error) ||
+          "Failed to run AI judges.";
+
+        const hint =
+          data && typeof data.hint === "string" ? data.hint : null;
+
+        setRunStatus({
+          kind: "error",
+          message: hint ? `${backendError} ${hint}` : backendError,
+        });
         return;
       }
 
-      setRunStatus(
-        `Planned: ${data.planned}, Completed: ${data.completed}, Failed: ${data.failed}`
-      );
+      const summary = `Planned: ${data?.planned ?? 0}, Completed: ${
+        data?.completed ?? 0
+      }, Failed: ${data?.failed ?? 0}`;
+
+      const note =
+        data && typeof data.note === "string" ? ` ${data.note}` : "";
+
+      const warnings =
+        Array.isArray(data?.warnings) && data.warnings.length > 0
+          ? ` Warnings: ${data.warnings.join(" ")}`
+          : "";
+
+      setRunStatus({
+        kind: data?.warnings?.length ? "error" : "success",
+        message: summary + note + warnings,
+      });
     } catch (err) {
       console.error(err);
-      setRunStatus("Failed to run AI judges. Check backend logs.");
+      setRunStatus({
+        kind: "error",
+        message:
+          "Failed to run AI judges. Possible network or backend error — check backend logs.",
+      });
     } finally {
       setIsRunning(false);
     }
   }
 
   if (!queueId) {
-    return <div style={{ padding: "1rem" }}>Missing queueId in URL.</div>;
+    return (
+      <section className="page-section">
+        <header className="page-header">
+          <h1 className="page-title">Queue</h1>
+        </header>
+        <div className="card">
+          <div className="card-body">
+            <p className="empty-state">Missing queueId in URL.</p>
+          </div>
+        </div>
+      </section>
+    );
   }
 
+  const totalAssignments = questionJudges.length;
+
   return (
-    <div style={{ padding: "1rem" }}>
-      <h1>Queue: {queueId}</h1>
+    <section className="page-section">
+      <header className="page-header">
+        <h1 className="page-title">Queue: {queueId}</h1>
+        <p className="page-subtitle">
+          Assign active judges to questions. When ready, run the AI judges to create
+          evaluation tasks for this queue.
+        </p>
+      </header>
 
-      {/* NEW: Run AI Judges controls */}
-      <div style={{ marginTop: "0.5rem", marginBottom: "1rem" }}>
-        <button
-          onClick={handleRunJudges}
-          disabled={
-            isRunning || loading || questions.length === 0 || judges.length === 0
-          }
-        >
-          {isRunning ? "Running..." : "Run AI Judges"}
-        </button>
-        {runStatus && (
-          <p style={{ marginTop: "0.5rem" }}>
-            <strong>Status:</strong> {runStatus}
-          </p>
-        )}
+      <div className="card" style={{ marginBottom: "1rem" }}>
+        <div className="card-body" style={{ gap: "0.75rem" }}>
+          {/* Summary */}
+          <div className="queue-summary">
+            <div className="queue-summary-item">
+              <span className="queue-summary-label">Questions</span>
+              <span className="queue-summary-value">{questions.length}</span>
+            </div>
+            <div className="queue-summary-item">
+              <span className="queue-summary-label">Active judges</span>
+              <span className="queue-summary-value">{judges.length}</span>
+            </div>
+            <div className="queue-summary-item">
+              <span className="queue-summary-label">Assignments</span>
+              <span className="queue-summary-value">{totalAssignments}</span>
+            </div>
+
+            <div className="queue-summary-cta">
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={handleRunJudges}
+                disabled={isRunning || loading}
+              >
+                {isRunning ? "Running…" : "Run AI Judges"}
+              </button>
+            </div>
+          </div>
+
+          {/* Run status */}
+          {runStatus.kind !== "idle" && runStatus.message && (
+            <div
+              className={`status-banner status-${runStatus.kind}`}
+              role="status"
+            >
+              {runStatus.message}
+            </div>
+          )}
+
+          {/* Load / error */}
+          {error && (
+            <div className="status-banner status-error" role="status">
+              {error}
+            </div>
+          )}
+
+          {loading && (
+            <p className="empty-state">Loading questions and judges…</p>
+          )}
+
+          {!loading && questions.length === 0 && (
+            <p className="empty-state">
+              No questions found for this queue. Import submissions to populate it.
+            </p>
+          )}
+
+          {!loading && questions.length > 0 && (
+            <div className="table-wrapper" style={{ marginTop: "0.5rem" }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Question</th>
+                    <th>Type</th>
+                    <th>Judges</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {questions.map((q) => (
+                    <tr key={q.id}>
+                      <td>
+                        <div className="table-primary">
+                          <div className="table-title">{q.question_text}</div>
+                        </div>
+                      </td>
+                      <td>
+                        <span className="badge badge-muted">
+                          {q.question_type}
+                        </span>
+                      </td>
+                      <td>
+                        {judges.length === 0 ? (
+                          <span className="empty-state">
+                            No active judges. Create some on the Judges page.
+                          </span>
+                        ) : (
+                          <div className="judge-chips">
+                            {judges.map((judge) => (
+                              <label key={judge.id} className="judge-chip">
+                                <input
+                                  type="checkbox"
+                                  checked={isAssigned(q.id, judge.id)}
+                                  onChange={(e) =>
+                                    handleToggle(
+                                      q.id,
+                                      judge.id,
+                                      e.target.checked
+                                    )
+                                  }
+                                />
+                                <span>{judge.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
-
-      {loading && <p>Loading questions and judges...</p>}
-      {error && <p style={{ color: "red" }}>{error}</p>}
-
-      {!loading && questions.length === 0 && (
-        <p>No questions found for this queue. Did you import data?</p>
-      )}
-
-      {!loading && questions.length > 0 && (
-        <table
-          style={{
-            borderCollapse: "collapse",
-            marginTop: "1rem",
-            minWidth: "700px",
-          }}
-        >
-          <thead>
-            <tr>
-              <th
-                style={{
-                  borderBottom: "1px solid #555",
-                  padding: "0.5rem",
-                  textAlign: "left",
-                }}
-              >
-                Question
-              </th>
-              <th
-                style={{
-                  borderBottom: "1px solid #555",
-                  padding: "0.5rem",
-                  textAlign: "left",
-                }}
-              >
-                Question Type
-              </th>
-              <th
-                style={{
-                  borderBottom: "1px solid #555",
-                  padding: "0.5rem",
-                  textAlign: "left",
-                }}
-              >
-                Judges
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {questions.map((q) => (
-              <tr key={q.id}>
-                <td
-                  style={{
-                    borderBottom: "1px solid #333",
-                    padding: "0.5rem",
-                  }}
-                >
-                  {q.question_text}
-                </td>
-                <td
-                  style={{
-                    borderBottom: "1px solid #333",
-                    padding: "0.5rem",
-                    fontSize: "0.85rem",
-                    color: "#ccc",
-                  }}
-                >
-                  {q.question_type}
-                </td>
-                <td
-                  style={{
-                    borderBottom: "1px solid #333",
-                    padding: "0.5rem",
-                  }}
-                >
-                  {judges.length === 0 ? (
-                    <span>No judges yet. Create some on the Judges page.</span>
-                  ) : (
-                    <div
-                      style={{
-                        display: "flex",
-                        flexWrap: "wrap",
-                        gap: "0.5rem",
-                      }}
-                    >
-                      {judges.map((judge) => (
-                        <label
-                          key={judge.id}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "0.25rem",
-                            border: "1px solid #444",
-                            padding: "0.25rem 0.5rem",
-                            borderRadius: "4px",
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isAssigned(q.id, judge.id)}
-                            onChange={(e) =>
-                              handleToggle(q.id, judge.id, e.target.checked)
-                            }
-                          />
-                          <span>{judge.name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
+    </section>
   );
 }

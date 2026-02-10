@@ -12,45 +12,59 @@ type Judge = {
 const emptyForm = {
   name: "",
   system_prompt: "",
-  model_name: "gpt-4.1-mini",
+  model_name: "", // sensible default, still editable
   active: true,
 };
+
+const MODEL_PRESETS: { label: string; value: string }[] = [
+  { label: "Gemini 2.5 Flash", value: "gemini-2.5-flash" },
+  { label: "Gemini 2.5 Pro", value: "gemini-2.5-pro" },
+];
 
 export default function JudgesPage() {
   const [judges, setJudges] = useState<Judge[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // Load judges on first render
   useEffect(() => {
-    loadJudges();
+    void loadJudges();
   }, []);
 
   async function loadJudges() {
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase
-      .from("judges")
-      .select("*")
-      .order("name", { ascending: true });
+    setSaveMessage(null);
 
-    if (error) {
-      console.error(error);
-      setError("Failed to load judges.");
-    } else {
-      setJudges(data as Judge[]);
+    try {
+      const { data, error } = await supabase
+        .from("judges")
+        .select("*")
+        .order("name", { ascending: true });
+
+      if (error) {
+        console.error(error);
+        setError("Failed to load judges.");
+      } else {
+        setJudges((data ?? []) as Judge[]);
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Unexpected error while loading judges.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   function handleChange(
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) {
     const { name, value, type } = e.target;
     const checked = (e.target as HTMLInputElement).checked;
+
     setForm((prev) => ({
       ...prev,
       [name]: type === "checkbox" ? checked : value,
@@ -60,6 +74,8 @@ export default function JudgesPage() {
   function startCreate() {
     setEditingId(null);
     setForm(emptyForm);
+    setError(null);
+    setSaveMessage(null);
   }
 
   function startEdit(judge: Judge) {
@@ -70,12 +86,25 @@ export default function JudgesPage() {
       model_name: judge.model_name,
       active: judge.active,
     });
+    setError(null);
+    setSaveMessage(null);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     setError(null);
+    setSaveMessage(null);
+
+    const trimmedName = form.name.trim();
+    const trimmedPrompt = form.system_prompt.trim();
+    const trimmedModel = form.model_name.trim();
+
+    if (!trimmedName || !trimmedPrompt || !trimmedModel) {
+      setError("Name, model, and system prompt are required.");
+      setSaving(false);
+      return;
+    }
 
     try {
       if (editingId) {
@@ -83,9 +112,9 @@ export default function JudgesPage() {
         const { data, error } = await supabase
           .from("judges")
           .update({
-            name: form.name,
-            system_prompt: form.system_prompt,
-            model_name: form.model_name,
+            name: trimmedName,
+            system_prompt: trimmedPrompt,
+            model_name: trimmedModel,
             active: form.active,
           })
           .eq("id", editingId)
@@ -97,14 +126,15 @@ export default function JudgesPage() {
         setJudges((prev) =>
           prev.map((j) => (j.id === editingId ? (data as Judge) : j))
         );
+        setSaveMessage("Judge updated.");
       } else {
         // Create new judge
         const { data, error } = await supabase
           .from("judges")
           .insert({
-            name: form.name,
-            system_prompt: form.system_prompt,
-            model_name: form.model_name,
+            name: trimmedName,
+            system_prompt: trimmedPrompt,
+            model_name: trimmedModel,
             active: form.active,
           })
           .select()
@@ -113,6 +143,7 @@ export default function JudgesPage() {
         if (error) throw error;
 
         setJudges((prev) => [...prev, data as Judge]);
+        setSaveMessage("Judge created.");
       }
 
       setForm(emptyForm);
@@ -127,11 +158,11 @@ export default function JudgesPage() {
 
   async function handleToggleActive(judge: Judge, newActive: boolean) {
     setError(null);
+    setSaveMessage(null);
+
     // Optimistic UI update
     setJudges((prev) =>
-      prev.map((j) =>
-        j.id === judge.id ? { ...j, active: newActive } : j
-      )
+      prev.map((j) => (j.id === judge.id ? { ...j, active: newActive } : j))
     );
 
     const { error } = await supabase
@@ -144,159 +175,240 @@ export default function JudgesPage() {
       setError("Failed to update active state.");
       // revert UI
       setJudges((prev) =>
-        prev.map((j) =>
-          j.id === judge.id ? { ...j, active: judge.active } : j
-        )
+        prev.map((j) => (j.id === judge.id ? { ...j, active: judge.active } : j))
       );
+    } else {
+      setSaveMessage("Active state updated.");
     }
   }
 
+  const isFormDisabled = saving || loading;
+
   return (
-    <div style={{ padding: "1rem" }}>
-      <h1>Judges</h1>
+    <section className="page-section">
+      <header className="page-header">
+        <h1 className="page-title">AI Judges</h1>
+        <p className="page-subtitle">
+          Define reusable judges with a name, target model, and rubric. Judges can be
+          toggled active/inactive and assigned per question in a queue.
+        </p>
+      </header>
 
-      {loading && <p>Loading judges...</p>}
-      {error && <p style={{ color: "red" }}>{error}</p>}
+      <div className="card" style={{ marginBottom: "1rem" }}>
+        {error && (
+          <div className="status-banner status-error" role="status">
+            {error}
+          </div>
+        )}
+        {saveMessage && (
+          <div className="status-banner status-success" role="status">
+            {saveMessage}
+          </div>
+        )}
 
-      {/* Judges table */}
-      {judges.length === 0 && !loading ? (
-        <p>No judges yet. Create one below.</p>
-      ) : (
-        <table
-          style={{
-            borderCollapse: "collapse",
-            marginBottom: "1.5rem",
-            minWidth: "600px",
-          }}
-        >
-          <thead>
-            <tr>
-              <th style={{ borderBottom: "1px solid #555", padding: "0.5rem" }}>
-                Name
-              </th>
-              <th style={{ borderBottom: "1px solid #555", padding: "0.5rem" }}>
-                Model
-              </th>
-              <th style={{ borderBottom: "1px solid #555", padding: "0.5rem" }}>
-                Active
-              </th>
-              <th style={{ borderBottom: "1px solid #555", padding: "0.5rem" }}>
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {judges.map((judge) => (
-              <tr key={judge.id}>
-                <td
-                  style={{
-                    borderBottom: "1px solid #333",
-                    padding: "0.5rem",
-                  }}
-                >
-                  {judge.name}
-                </td>
-                <td
-                  style={{
-                    borderBottom: "1px solid #333",
-                    padding: "0.5rem",
-                  }}
-                >
-                  {judge.model_name}
-                </td>
-                <td
-                  style={{
-                    borderBottom: "1px solid #333",
-                    padding: "0.5rem",
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={judge.active}
-                    onChange={(e) =>
-                      handleToggleActive(judge, e.target.checked)
-                    }
-                  />
-                </td>
-                <td
-                  style={{
-                    borderBottom: "1px solid #333",
-                    padding: "0.5rem",
-                  }}
-                >
-                  <button onClick={() => startEdit(judge)}>Edit</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+        <div className="card-body" style={{ gap: "1rem" }}>
+          <div className="card-main">
+            <div className="section-header">
+              <h2 className="section-title">Existing judges</h2>
+              {loading && (
+                <span className="section-tag">Loading…</span>
+              )}
+            </div>
 
-      {/* Form */}
-      <h2>{editingId ? "Edit Judge" : "Create Judge"}</h2>
-      <form
-        onSubmit={handleSubmit}
-        style={{ display: "flex", flexDirection: "column", maxWidth: "600px" }}
-      >
-        <label style={{ marginBottom: "0.5rem" }}>
-          Name
-          <input
-            name="name"
-            value={form.name}
-            onChange={handleChange}
-            style={{ width: "100%", padding: "0.25rem" }}
-            required
-          />
-        </label>
-
-        <label style={{ marginBottom: "0.5rem" }}>
-          Model name
-          <input
-            name="model_name"
-            value={form.model_name}
-            onChange={handleChange}
-            style={{ width: "100%", padding: "0.25rem" }}
-            required
-          />
-        </label>
-
-        <label style={{ marginBottom: "0.5rem" }}>
-          System prompt / rubric
-          <textarea
-            name="system_prompt"
-            value={form.system_prompt}
-            onChange={handleChange}
-            rows={4}
-            style={{ width: "100%", padding: "0.25rem" }}
-            required
-          />
-        </label>
-
-        <label style={{ marginBottom: "0.5rem" }}>
-          <input
-            type="checkbox"
-            name="active"
-            checked={form.active}
-            onChange={handleChange}
-          />{" "}
-          Active
-        </label>
-
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-          <button type="submit" disabled={saving}>
-            {saving
-              ? "Saving..."
-              : editingId
-              ? "Save changes"
-              : "Create judge"}
-          </button>
-          {editingId && (
-            <button type="button" onClick={startCreate}>
-              Cancel edit
-            </button>
-          )}
+            {judges.length === 0 && !loading ? (
+              <p className="empty-state">
+                No judges yet. Create your first judge using the form below.
+              </p>
+            ) : (
+              <div className="table-wrapper">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Model</th>
+                      <th>Status</th>
+                      <th style={{ width: "1%" }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {judges.map((judge) => (
+                      <tr key={judge.id}>
+                        <td>
+                          <div className="table-primary">
+                            <div className="table-title">{judge.name}</div>
+                          </div>
+                        </td>
+                        <td>
+                          <code className="code-pill">{judge.model_name}</code>
+                        </td>
+                        <td>
+                          <span
+                            className={
+                              judge.active ? "badge badge-success" : "badge badge-muted"
+                            }
+                          >
+                            {judge.active ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="table-actions">
+                            <label className="switch">
+                              <input
+                                type="checkbox"
+                                checked={judge.active}
+                                onChange={(e) =>
+                                  handleToggleActive(judge, e.target.checked)
+                                }
+                              />
+                              <span className="slider" />
+                            </label>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={() => startEdit(judge)}
+                            >
+                              Edit
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
-      </form>
-    </div>
+      </div>
+
+      <div className="card">
+        <div className="card-body" style={{ gap: "0.75rem" }}>
+          <div className="section-header">
+            <h2 className="section-title">
+              {editingId ? "Edit judge" : "Create judge"}
+            </h2>
+            {editingId && (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={startCreate}
+                disabled={isFormDisabled}
+              >
+                Cancel edit
+              </button>
+            )}
+          </div>
+
+          <form
+            onSubmit={handleSubmit}
+            className="form-grid"
+          >
+            <div className="form-field">
+              <label className="field-label" htmlFor="judge-name">
+                Name
+              </label>
+              <input
+                id="judge-name"
+                name="name"
+                value={form.name}
+                onChange={handleChange}
+                className="text-input"
+                placeholder="e.g. Sky color checker"
+                required
+                disabled={isFormDisabled}
+              />
+            </div>
+
+            <div className="form-field">
+              <label className="field-label" htmlFor="judge-model">
+                Target model
+              </label>
+
+              <div className="model-row">
+                <input
+                  id="judge-model"
+                  name="model_name"
+                  value={form.model_name}
+                  onChange={handleChange}
+                  className="text-input"
+                  placeholder="e.g. gemini-2.5-flash"
+                  required
+                  disabled={isFormDisabled}
+                />
+
+                <select
+                  name="modelPreset"
+                  className="select-input"
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (!value) return;
+                    setForm((prev) => ({ ...prev, model_name: value }));
+                  }}
+                  disabled={isFormDisabled}
+                  defaultValue=""
+                >
+                  <option value="">Presets…</option>
+                  {MODEL_PRESETS.map((preset) => (
+                    <option key={preset.value} value={preset.value}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <p className="field-help">
+                You can type any valid provider model name, or pick a preset. The backend
+                will validate it when running evaluations.
+              </p>
+            </div>
+
+            <div className="form-field form-field-full">
+              <label className="field-label" htmlFor="judge-prompt">
+                System prompt / rubric
+              </label>
+              <textarea
+                id="judge-prompt"
+                name="system_prompt"
+                value={form.system_prompt}
+                onChange={handleChange}
+                rows={5}
+                className="textarea-input"
+                placeholder="Explain how to decide pass / fail / inconclusive for this question type…"
+                required
+                disabled={isFormDisabled}
+              />
+              <p className="field-help">
+                This text is sent as the system prompt when the judge evaluates answers.
+              </p>
+            </div>
+
+            <div className="form-footer">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  name="active"
+                  checked={form.active}
+                  onChange={handleChange}
+                  disabled={isFormDisabled}
+                />
+                <span>Active</span>
+              </label>
+
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={isFormDisabled}
+              >
+                {saving
+                  ? "Saving…"
+                  : editingId
+                  ? "Save changes"
+                  : "Create judge"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
   );
 }
