@@ -32,6 +32,10 @@ export default function QueuePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // status + loading for "Run AI Judges"
+  const [runStatus, setRunStatus] = useState<string | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
+
   useEffect(() => {
     if (!queueId) return;
     loadData(queueId);
@@ -135,6 +139,40 @@ export default function QueuePage() {
     }
   }
 
+  // call backend /api/run-judges
+  async function handleRunJudges() {
+    if (!queueId) return;
+
+    setError(null);
+    setRunStatus("Running AI judges...");
+    setIsRunning(true);
+
+    try {
+      const res = await fetch("http://localhost:8787/api/run-judges", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ queueId }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        console.error("Run judges error:", data);
+        setRunStatus("Failed to run AI judges.");
+        return;
+      }
+
+      setRunStatus(
+        `Planned: ${data.planned}, Completed: ${data.completed}, Failed: ${data.failed}`
+      );
+    } catch (err) {
+      console.error(err);
+      setRunStatus("Failed to run AI judges. Check backend logs.");
+    } finally {
+      setIsRunning(false);
+    }
+  }
+
   if (!queueId) {
     return <div style={{ padding: "1rem" }}>Missing queueId in URL.</div>;
   }
@@ -142,6 +180,23 @@ export default function QueuePage() {
   return (
     <div style={{ padding: "1rem" }}>
       <h1>Queue: {queueId}</h1>
+
+      {/* NEW: Run AI Judges controls */}
+      <div style={{ marginTop: "0.5rem", marginBottom: "1rem" }}>
+        <button
+          onClick={handleRunJudges}
+          disabled={
+            isRunning || loading || questions.length === 0 || judges.length === 0
+          }
+        >
+          {isRunning ? "Running..." : "Run AI Judges"}
+        </button>
+        {runStatus && (
+          <p style={{ marginTop: "0.5rem" }}>
+            <strong>Status:</strong> {runStatus}
+          </p>
+        )}
+      </div>
 
       {loading && <p>Loading questions and judges...</p>}
       {error && <p style={{ color: "red" }}>{error}</p>}
@@ -242,11 +297,7 @@ export default function QueuePage() {
                             type="checkbox"
                             checked={isAssigned(q.id, judge.id)}
                             onChange={(e) =>
-                              handleToggle(
-                                q.id,
-                                judge.id,
-                                e.target.checked
-                              )
+                              handleToggle(q.id, judge.id, e.target.checked)
                             }
                           />
                           <span>{judge.name}</span>
