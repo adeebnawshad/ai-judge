@@ -1,212 +1,196 @@
-AI Judge — LLM-Powered Evaluation Layer
+# **AI Judge — LLM-Powered Evaluation Layer**
 
-AI Judge is a small web application that adds an automated AI Judge layer on top of human-labeled submissions.
+AI Judge is a lightweight web application that adds an automated **AI Judge** layer on top of human-labeled submissions.
 
 It allows users to:
 
-Import submission data
+- Import submission data  
+- Configure AI judges (LLM prompts + model names)  
+- Assign judges to questions in a queue  
+- Run evaluations against a real LLM provider  
+- Review results with filters and pass-rate statistics  
 
-Configure AI judges (LLM prompts + models)
+This project mirrors a simplified version of an internal annotation/review tool.
 
-Assign judges to questions in a queue
+---
 
-Run evaluations against a real LLM provider
+## **Tech Stack**
 
-Review results with filters and pass-rate statistics
+### **Frontend**
+- React 18  
+- TypeScript  
+- Vite  
+- React Router  
 
-This project mirrors a simplified version of an internal annotation / review tool.
+### **Backend**
+- Node.js  
+- Express  
+- Supabase (Postgres persistence)  
+- Google Gemini API (LLM provider)  
 
-Tech Stack
-Frontend
+---
 
-React 18
+## **How to Run Locally**
 
-TypeScript
+### **Prerequisites**
+- Node.js 18+  
+- A Supabase project  
+- A Gemini API key  
 
-Vite
+---
 
-React Router
+## **Frontend Setup**
 
-Backend
-
-Node.js
-
-Express
-
-Supabase (Postgres + persistence)
-
-Google Gemini API (LLM provider)
-
-How to Run Locally
-Prerequisites
-
-Node.js 18+
-
-A Supabase project
-
-A Gemini API key
-
-Frontend
+```bash
 npm install
 npm run dev
+```
 
-App will open at:
-http://localhost:5173
+The app will open at: **http://localhost:5173**
 
-Environment Variables (Frontend)
+### **Environment Variables (Frontend)**
 
-Create a .env file in the project root:
+Create a `.env` file in the project root:
+
+```
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_publishable_key
+```
 
+---
 
-Backend
+## **Backend Setup**
+
+```bash
 cd backend
 npm install
 npm start
+```
 
+Backend runs at: **http://localhost:8787**
 
-Backend runs at:
-http://localhost:8787
+### **Environment Variables (Backend)**
 
-Environment Variables (Backend)
+Create a `.env` file inside `backend/`:
 
-Create a .env file in backend/:
-
+```
 SUPABASE_URL=your_supabase_url
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 GEMINI_API_KEY=your_gemini_api_key
+```
 
-Core Features
-1. Data Import
+---
 
-Upload a JSON file following the provided sample schema
+## **Core Features**
 
-Parsed submissions, questions, answers, and queues are persisted to Supabase
+### **1. Data Import**
+- Upload a JSON file following the provided sample schema  
+- Parsed submissions, questions, answers, and queues are persisted to Supabase  
+- All data is stored server-side (not in localStorage or client memory)
 
-Data is stored in the backend (not in memory or localStorage)
+---
 
-2. AI Judge Definitions
+### **2. AI Judge Definitions**
+Create, edit, and deactivate AI judges.  
+Each judge contains:
 
-Create, edit, and deactivate AI judges
+- Name  
+- System prompt / rubric  
+- Target model name (free-text, provider-agnostic)  
+- Active flag  
 
-Each judge stores:
+Judges persist across reloads.
 
-Name
+---
 
-System prompt / rubric
+### **3. Assigning Judges to Questions**
+For each queue, users can assign one or more **active** judges to each question.  
+Assignments are persisted and used by the evaluation runner.
 
-Target model name (free-text, provider-agnostic)
+---
 
-Active flag
+### **4. Running Evaluations**
+From the queue page, “Run AI Judges” triggers evaluation runs.
 
-Judges persist across reloads
+For each **submission × question × assigned judge**:
 
-3. Assigning Judges to Questions
+- Builds a prompt using judge rubric + question text + user answer  
+- Calls the Gemini API  
+- Parses structured JSON output  
+- Stores a verdict & reasoning in Supabase  
 
-For a given queue, assign one or more active judges per question
+Includes a real-time run summary:
 
-Assignments are persisted and later used by the evaluation runner
+- Planned count  
+- Completed count  
+- Failed count  
 
-4. Running Evaluations
+Typical errors (missing config, quota limits, LLM timeouts) are handled cleanly.
 
-“Run AI Judges” action on the queue page
+---
 
-For each submission × question × assigned judge:
+### **5. Results View**
+Dedicated results page listing all evaluations:
 
-Builds a prompt from the judge rubric, question text, and user answer
+- Submission  
+- Question  
+- Judge  
+- Verdict  
+- Reasoning  
+- Timestamp  
 
-Calls a real LLM provider (Gemini)
+**Filters:**
+- Judge (multi-select)  
+- Question (multi-select)  
+- Verdict (pass / fail / inconclusive)  
 
-Parses structured JSON output
+Aggregate **pass-rate statistics** update dynamically based on active filters.
 
-Persists an evaluation record with verdict and reasoning
+---
 
-Run summary includes:
+## **Bonus Features**
 
-Planned count
+### **Pass Rate by Judge**
+A visual breakdown showing how strict/lenient each judge is.  
+Automatically respects filters on the Results page.
 
-Completed count
+---
 
-Failed count
+### **Error Handling**
 
-Common error cases (e.g. missing configuration, LLM quota errors) are handled gracefully.
+#### **Frontend**
+- Ensures required conditions before running judges (e.g., at least 1 question, at least 1 active judge)  
 
-5. Results View
+#### **Backend**
+- Handles:
+  - LLM timeouts  
+  - Quota and rate-limit errors  
+  - Malformed responses  
+- Responds with structured error hints  
+- UI displays clear status banners instead of failing silently  
 
-Dedicated Results page listing all evaluations:
+---
 
-Submission
+## **Trade-Offs & Design Decisions**
 
-Question
+- **Open-ended model field** — allows any model name (Gemini, OpenAI, Claude, etc.) without hardcoding  
+- **Repeated imports allowed** — preserves ingestion behavior without deduplication  
+- **Sequential LLM calls** — simpler, more predictable, avoids concurrency edge cases  
 
-Judge
+---
 
-Verdict
+## **Time Spent**
 
-Reasoning
+**≈ 15 hours total.**
 
-Created timestamp
+---
 
-Filters:
-
-Judge (multi-select)
-
-Question (multi-select)
-
-Verdict (pass / fail / inconclusive)
-
-Aggregate pass-rate summary updates live based on active filters.
-
-Bonus Features
-Pass Rate by Judge
-
-Visual “pass rate by judge” breakdown
-
-Shows how strict or lenient each judge is
-
-Automatically respects active filters in the Results view
-
-Error Handling
-
-Frontend
-
-Validates required conditions before running judges
-(e.g. no questions, no active judges, no assignments)
-
-Backend
-
-Handles LLM timeouts, quota/rate-limit errors, and malformed responses
-
-Returns structured error hints to the frontend
-
-UI displays clear status banners instead of failing silently.
-
-Trade-offs & Design Decisions
-
-Model field is open-ended: users can type any valid provider model name
-→ keeps the system flexible as models change frequently
-
-Repeated imports are allowed: imports preserve raw ingestion behavior
-→ avoids destructive deduplication logic
-
-Sequential LLM calls: chosen over parallel execution
-→ simpler and more predictable
-
-Time Spent
-
-~15 hours total.
-
-Demo Walkthrough (Loom)
+## **Demo Walkthrough (Loom)**
 
 The screen recording demonstrates:
 
-Importing sample data
-
-Creating and editing AI judges
-
-Assigning judges to questions in a queue
-
-Running AI judges
-
-Reviewing results with filters and pass-rate statistics
+- Importing sample data  
+- Creating and editing AI judges  
+- Assigning judges in a queue  
+- Running AI judges  
+- Reviewing results with filters and pass-rate statistics  
