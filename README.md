@@ -1,73 +1,212 @@
-# React + TypeScript + Vite
+AI Judge — LLM-Powered Evaluation Layer
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+AI Judge is a small web application that adds an automated AI Judge layer on top of human-labeled submissions.
 
-Currently, two official plugins are available:
+It allows users to:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Import submission data
 
-## React Compiler
+Configure AI judges (LLM prompts + models)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Assign judges to questions in a queue
 
-## Expanding the ESLint configuration
+Run evaluations against a real LLM provider
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+Review results with filters and pass-rate statistics
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+This project mirrors a simplified version of an internal annotation / review tool.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+Tech Stack
+Frontend
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+React 18
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+TypeScript
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Vite
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+React Router
+
+Backend
+
+Node.js
+
+Express
+
+Supabase (Postgres + persistence)
+
+Google Gemini API (LLM provider)
+
+How to Run Locally
+Prerequisites
+
+Node.js 18+
+
+A Supabase project
+
+A Gemini API key
+
+Frontend
+npm install
+npm run dev
+
+App will open at:
+http://localhost:5173
+
+Environment Variables (Frontend)
+
+Create a .env file in the project root:
+VITE_SUPABASE_URL=your_supabase_url
+VITE_SUPABASE_ANON_KEY=your_publishable_key
+
+
+Backend
+cd backend
+npm install
+npm start
+
+
+Backend runs at:
+http://localhost:8787
+
+Environment Variables (Backend)
+
+Create a .env file in backend/:
+
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+GEMINI_API_KEY=your_gemini_api_key
+
+Core Features
+1. Data Import
+
+Upload a JSON file following the provided sample schema
+
+Parsed submissions, questions, answers, and queues are persisted to Supabase
+
+Data is stored in the backend (not in memory or localStorage)
+
+2. AI Judge Definitions
+
+Create, edit, and deactivate AI judges
+
+Each judge stores:
+
+Name
+
+System prompt / rubric
+
+Target model name (free-text, provider-agnostic)
+
+Active flag
+
+Judges persist across reloads
+
+3. Assigning Judges to Questions
+
+For a given queue, assign one or more active judges per question
+
+Assignments are persisted and later used by the evaluation runner
+
+4. Running Evaluations
+
+“Run AI Judges” action on the queue page
+
+For each submission × question × assigned judge:
+
+Builds a prompt from the judge rubric, question text, and user answer
+
+Calls a real LLM provider (Gemini)
+
+Parses structured JSON output
+
+Persists an evaluation record with verdict and reasoning
+
+Run summary includes:
+
+Planned count
+
+Completed count
+
+Failed count
+
+Common error cases (e.g. missing configuration, LLM quota errors) are handled gracefully.
+
+5. Results View
+
+Dedicated Results page listing all evaluations:
+
+Submission
+
+Question
+
+Judge
+
+Verdict
+
+Reasoning
+
+Created timestamp
+
+Filters:
+
+Judge (multi-select)
+
+Question (multi-select)
+
+Verdict (pass / fail / inconclusive)
+
+Aggregate pass-rate summary updates live based on active filters.
+
+Bonus Features
+Pass Rate by Judge
+
+Visual “pass rate by judge” breakdown
+
+Shows how strict or lenient each judge is
+
+Automatically respects active filters in the Results view
+
+Error Handling
+
+Frontend
+
+Validates required conditions before running judges
+(e.g. no questions, no active judges, no assignments)
+
+Backend
+
+Handles LLM timeouts, quota/rate-limit errors, and malformed responses
+
+Returns structured error hints to the frontend
+
+UI displays clear status banners instead of failing silently.
+
+Trade-offs & Design Decisions
+
+Model field is open-ended: users can type any valid provider model name
+→ keeps the system flexible as models change frequently
+
+Repeated imports are allowed: imports preserve raw ingestion behavior
+→ avoids destructive deduplication logic
+
+Sequential LLM calls: chosen over parallel execution
+→ simpler and more predictable
+
+Time Spent
+
+~15 hours total.
+
+Demo Walkthrough (Loom)
+
+The screen recording demonstrates:
+
+Importing sample data
+
+Creating and editing AI judges
+
+Assigning judges to questions in a queue
+
+Running AI judges
+
+Reviewing results with filters and pass-rate statistics
